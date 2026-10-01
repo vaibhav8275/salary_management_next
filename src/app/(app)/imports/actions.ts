@@ -14,12 +14,16 @@ export interface UploadState {
 /**
  * Uploads a CSV.
  *
- * The API validates the file on arrival — present, at most 2 MB, `.csv`
- * extension, and a content type a CSV plausibly arrives as (LLD §2.6) — and
- * answers a rejection with a 422 carrying the reason, which is surfaced
- * verbatim. The client-side checks here are only about picking a file at all;
- * anything about the file's contents is left to the server, so the rules have one
- * home rather than two that can drift.
+ * The API is the authority on what is acceptable: present, at most 2 MB, `.csv`
+ * extension, a content type a CSV plausibly arrives as (LLD §2.6), and within
+ * the uploader's 60 MB daily allowance. A rejection comes back as a 422 carrying
+ * the reason and is surfaced verbatim.
+ *
+ * The browser also refuses an obviously wrong file before it is sent — see
+ * `rejectionFor` in the view — but only so the answer arrives before the upload
+ * rather than after it. That check is not a second home for the rules: a request
+ * that skips it, and any change to the model's limits, is still caught here and
+ * on the server.
  */
 export async function uploadCsvAction(
   _prev: UploadState,

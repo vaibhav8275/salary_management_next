@@ -1,0 +1,36 @@
+# Keep the build context small and free of local state.
+#
+# This file exists because Dockerfile line 23 is `COPY . .`. Without this, Docker
+# uploads the entire working directory to the builder -- including .git (the whole
+# history), .kamal/secrets, node_modules and any .env on this machine.
+#
+# Nothing here is a secret in the strict sense, but two consequences are real:
+#
+#   1. .env is read by Next.js at BUILD time. Only NEXT_PUBLIC_* variables get
+#      inlined into the client bundle, so a RAILS_API_URL-style value is safe --
+#      but any NEXT_PUBLIC_ value added to .env would ship to browsers.
+#   2. The final image only carries .next/standalone, .next/static and public
+#      (Dockerfile 68-74), so none of this reaches the pushed ECR image. It does
+#      land in the intermediate build stage and in the local build cache, which
+#      is still more persistence than anyone wants for local files.
+#
+# Deliberately NOT excluded: package.json, package-lock.json, next.config.ts,
+# tsconfig.json, postcss.config.mjs, eslint.config.mjs, config/, src/, public/.
+# The build needs all of them.
+
+# Dependencies and build output
+node_modules
+.next
+out
+build
+*.tsbuildinfo
+
+# Local state and history
+.git
+.gitignore
+.env
+.env.*
+.kamal
+*.log
+npm-debug.log*
+.DS_Store

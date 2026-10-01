@@ -2,19 +2,36 @@ import { cookies } from "next/headers";
 import { SESSION_COOKIE, USER_COOKIE } from "./api";
 
 /**
+ * Whether to mark the cookies `Secure`.
+ *
+ * This is read from the environment rather than inferred from `NODE_ENV`, and
+ * that distinction is load-bearing. A browser silently *discards* a `Secure`
+ * cookie that arrives over plain `http://`, so tying the flag to production mode
+ * made every sign-in appear to succeed and then bounce straight back to
+ * `/login` on the next click: `proxy.ts` saw no cookie, because the browser had
+ * never stored it. Development was the only place it worked, since localhost is
+ * treated as a secure origin and accepts the flag over http.
+ *
+ * The deployment is currently http on a bare IP with TLS off, hence `false` in
+ * `deploy.yml`. Flip `COOKIE_SECURE` to `"true"` in the same commit that puts a
+ * certificate in front of the app &mdash; never before, or sign-in breaks again.
+ */
+const COOKIE_SECURE = process.env.COOKIE_SECURE === "true";
+
+/**
  * Cookie options for the JWT.
  *
  * `httpOnly` is the point of the whole design: the token is never reachable from
  * client JavaScript, so an injected script cannot read it. `sameSite: "lax"`
- * keeps it off cross-site requests, and `secure` is set outside development so
- * it only ever travels over HTTPS in a deployment. `maxAge` matches the token's
- * own lifetime (`expiration_time` in config/initializers/devise_jwt.rb, 1800s),
- * so the cookie and the token expire together rather than the cookie outliving a
- * token that no longer verifies.
+ * keeps it off cross-site requests, and `secure` follows `COOKIE_SECURE` so it
+ * only travels over HTTPS once TLS is actually in front of the site.
+ * `maxAge` matches the token's own lifetime (`expiration_time` in
+ * config/initializers/devise_jwt.rb, 1800s), so the cookie and the token expire
+ * together rather than the cookie outliving a token that no longer verifies.
  *
  * Keeping the two in step is deliberate. A cookie that outlives its token would
- * keep `proxy.ts` treating the holder as signed in — that check only tests for
- * presence — while every real request came back 401 from the API, which reads as
+ * keep `proxy.ts` treating the holder as signed in &mdash; that check only tests for
+ * presence &mdash; while every real request came back 401 from the API, which reads as
  * a broken app rather than an expired session.
  */
 const THIRTY_MINUTES_SECONDS = 30 * 60;
@@ -22,7 +39,7 @@ const THIRTY_MINUTES_SECONDS = 30 * 60;
 export const sessionCookieOptions = {
   httpOnly: true,
   sameSite: "lax" as const,
-  secure: process.env.NODE_ENV === "production",
+  secure: COOKIE_SECURE,
   path: "/",
   maxAge: THIRTY_MINUTES_SECONDS,
 };

@@ -42,5 +42,19 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!api|_next/static|_next/image|favicon.ico|.*\\.svg$).*)"],
+  // `well_known` is the important exclusion here and the reason is deployment,
+  // not login.
+  //
+  // kamal-proxy answers Let's Encrypt's HTTP-01 challenge at
+  // /.well-known/acme-challenge/<token> on port 80. This matcher used to let
+  // those requests through, and because they are unauthenticated by nature, the
+  // check above redirected them to /login with a 307 -- so Let's Encrypt
+  // received a login page instead of the token, the challenge failed, and TLS
+  // could not be enabled.
+  //
+  // The symptom is easy to misread: nothing is logged as an error at deploy time
+  // and the site works fine over HTTP. Only the ACME request fails, quietly.
+  matcher: [
+    "/((?!api|\\.well-known|_next/static|_next/image|favicon.ico|.*\\.svg$).*)",
+  ],
 };

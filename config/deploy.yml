@@ -1,0 +1,206 @@
+# Kamal deploy config for the Next.js frontend.
+#
+# Same host as the Rails API. kamal-proxy on that host owns :80/:443 and routes
+# by path:
+#
+#   /api/*     ->  the Rails API (path_prefixes in its own config)
+#   /up        ->  Rails health check, so the deploy probe is not answered here
+#   /api-docs  ->  rswag
+#   /*         ->  this app, registered as the catch-all
+#
+# The catch-all is why this config has no path_prefixes. kamal-proxy matches the
+# longest prefix first, so Rails claims its paths and everything unmatched lands
+# here.
+#
+# This app is deployed WITHOUT a destination -- plain `kamal deploy`, no `-d`.
+# That is a decision, not an oversight. Kamal names each proxy service after
+# [service, role, destination], so the same app registers under a different proxy
+# service the moment a destination is added. Adding one later, without removing
+# the old registration, fails with "host settings conflict with another service",
+# because both are catch-alls on the same host. Do not add a destination to this
+# app without first running:
+#
+#   docker exec kamal-proxy kamal-proxy remove salary-management-web-web
+#
+# (Kamal also reads a different secrets file per destination, so a destination
+# here would additionally require a .kamal/secrets.production.)
+#
+# Kamal renders this file through ERB before parsing it. The four deployment
+# values that are literals here -- the host, the AWS account, the SSH login and
+# the API URL -- are read from .env rather than committed. Kamal does not load
+# .env itself, so the ERB does; see the block below.
+
+service: salary-management-web
+
+image: salary-management-web
+
+<%
+  # `dotenv` resolves without being declared here because the kamal gem depends on
+  # it directly (kamal 2.12 requires dotenv ~> 3.1) and this repo has no
+  # Bundler binstub for kamal. A Rails app does need dotenv-rails in the default
+  # Gemfile group for the same reason to hold.
+  require "dotenv"
+
+  # Relative to the working directory, not __dir__: Kamal renders this ERB from
+  # inside its own gem, so __dir__ points at the installed package rather than at
+  # this app. Every kamal command is documented to run from the app root, which is
+  # also where config/deploy.yml is found.
+  #
+  # `overload`, not `load`. `load` lets an ambient shell variable win, so a stray
+  # exported EIP would silently deploy somewhere else and still report success. The
+  # file wins here; a one-off override is edited into the file.
+  Dotenv.overload(".env")
+
+  required = lambda do |key|
+    value = ENV[key]
+    raise "config/deploy.yml: #{key} is not set. Copy .env.example to .env and fill it in." if value.nil? || value.strip.empty?
+    value
+  end
+
+  eip = required.call("EIP")
+  aws_account = required.call("AWS_ACCOUNT")
+  aws_region = required.call("AWS_REGION")
+  ssh_user = required.call("SSH_USER")
+  ssh_key_path = required.call("SSH_KEY_PATH")
+  rails_api_url = required.call("RAILS_API_URL")
+-%>
+servers:
+  web:
+    # EIP from .env. Reachable because the host has a public IP and the security
+    # group allows SSH from the permitted range.
+    - <%= eip %>
+
+proxy:
+  # This app listens on 3000, not 80.
+  #
+  # kamal's proxy.app_port defaults to 80, which is right for the Rails image
+  # (its Dockerfile EXPOSEs 80) and wrong here. Getting it wrong fails in a
+  # confusing way: the container starts fine and logs "Ready", because Next.js
+  # never learns it is being probed on the wrong port. kamal-proxy then tries to
+  # reach a container on port 80, where nothing is listening, and reports
+  # "target failed to become healthy within configured timeout (30s)" -- a
+  # message that reads like a slow boot rather than a port mismatch.
+  app_port: 3000
+
+  # Access is by Elastic IP, with no hostname involved, so both apps register
+  # under the wildcard host. That wildcard is what makes the bare IP work.
+  #
+  # kamal-proxy matches host FIRST, then longest path prefix. Without a wildcard,
+  # a request for http://<EIP>/ carries Host: <EIP>, which matches no service, and
+  # kamal-proxy answers 404 itself -- the request never reaches either app. That
+  # 404 is served by the proxy, not by Next.js, which is how you can tell the two
+  # apart.
+  #
+  # Both services must be host-less for the path split to work. They are separate
+  # proxy services, each with its own target, so this is not a duplicate
+  # declaration: Rails takes /api/v1, /up and /api-docs, and this catch-all (no
+  # path_prefix, so it matches "/") takes everything else, including /api/imports
+  # where this app's own route handlers live.
+  #
+  # There is deliberately NO `host` key here. Omitting it is what makes kamal-proxy
+  # serve this app on any Host header, which is what a bare-IP URL needs -- a
+  # request to http://<EIP>/ arrives with "Host: <EIP>", and that has to match
+  # something.
+  #
+  # Note `host: "*"` does NOT do this. The asterisk is registered as a literal
+  # hostname, so it matches neither the IP nor anything else, and every request
+  # 404s at the proxy. That failure is quiet and deceptive: the proxy logs show
+  # status 404 with "service":"" and "target":"" -- empty, meaning the request
+  # never reached an app -- while both containers report healthy and every deploy
+  # succeeds. Absence of the key, not a wildcard value, is the wildcard.
+  #
+  # No `ssl` here, matching the Rails config. Both apps serve plain HTTP on the
+  # Elastic IP; kamal-proxy owns :80 on the host. Note that Next.js itself is NOT
+  # listening on :80 -- it listens on 3000 (app_port above) and kamal-proxy
+  # forwards the host's :80 here. Only one process can bind :80, and that is the
+  # proxy.
+
+# ECR in us-east-1. The username is literally "AWS" and the password is the
+# short-lived token from get-login-password; there is no long-lived registry
+# password to store. .kamal/secrets-common fetches it at deploy time.
+registry:
+  server: <%= aws_account %>.dkr.ecr.<%= aws_region %>.amazonaws.com
+  username: AWS
+  password:
+    - KAMAL_REGISTRY_PASSWORD
+
+# SSH. Both values come from .env. The private key is referenced by PATH only: the
+# key file itself is never uploaded, copied or read into any build context or
+# image, and .dockerignore excludes the repo's local state.
+ssh:
+  # The option is `keys` (plural) and it is a list. `key:` is not a recognised
+  # key and kamal refuses to start on it -- an unknown key is a hard error rather
+  # than something logged and ignored, so a typo here looks like a broken install.
+  user: <%= ssh_user %>
+  keys:
+    - <%= ssh_key_path %>
+
+env:
+  clear:
+    # Absolute URL of the Rails API, from .env. Read at run time from the
+    # environment, not inlined at build time: src/lib/api.ts only ever calls the
+    # API from Server Components, Server Actions and Route Handlers, never from
+    # the browser.
+    #
+    # The browser only talks to Next.js. That is what removes the need for CORS
+    # on the Rails side entirely, and why a relative path would not work here --
+    # a server-side fetch has no origin to resolve one against.
+    # No hostname in this deployment, so the API is addressed by Elastic IP.
+    # Server-side fetches go through kamal-proxy, which routes them by path --
+    # /api/v1 reaches Rails even though the request arrived with Host: <EIP>,
+    # because both services share the wildcard host.
+    #
+    # This stays its own variable in .env rather than being derived from EIP: it
+    # answers "where does the API live", which is a different question from "where
+    # does this frontend deploy". They are the same host today and need not stay
+    # that way.
+    #
+    # Must stay http, not https: TLS is off with no certificate, so an https
+    # fetch here fails the TLS handshake and every server-rendered page that
+    # touches the API errors out.
+    RAILS_API_URL: <%= rails_api_url %>
+
+    # Marks the session cookies Secure. Must stay "false" while the site is
+    # served over plain http on a bare IP: browsers silently DISCARD a Secure
+    # cookie received over http://, which made every sign-in look successful
+    # and then bounce back to /login on the next navigation. Flip this to "true"
+    # in the same change that puts TLS in front of the app.
+    COOKIE_SECURE: "false"
+
+    PORT: "3000"
+    NODE_ENV: production
+
+# Build locally rather than on the deploy host.
+#
+# A remote builder was the original choice, on the theory that it guarantees the
+# image matches the host's architecture. It does not work here: the remote
+# builder connects through a docker context over SSH, and this host has no
+# `docker` user to authenticate as. Creating one to move a build is not worth
+# it.
+#
+# Building locally is correct as long as arch is pinned. This machine and the
+# EC2 host are both x86_64 today, but `arch: amd64` states that as a fact about
+# the image rather than leaving it to be inferred from whatever laptop is
+# running the deploy. Without it, an ARM Mac would push an arm64 image the host
+# cannot run -- and since that failure appears at container start rather than at
+# push time, it reads as a broken app rather than a mismatch.
+builder:
+  arch: amd64
+
+  # `context: .` disables kamal's git clone, which is what otherwise happens
+  # whenever git is present and no context is set.
+  #
+  # It matters here for the same reason as the Rails app: the clone is taken at
+  # HEAD, and the Dockerfile and .kamal/ are uncommitted, so the clone has no
+  # Dockerfile and the build fails with "failed to read dockerfile: open
+  # Dockerfile: no such file or directory". There is no `git_clone: false` key in
+  # Kamal 2.12 -- setting an explicit context is the supported way to opt out.
+  #
+  # Because an explicit context sends the working directory to the builder rather
+  # than a clone, .dockerignore is load-bearing here in a way it would not be
+  # otherwise: it is what keeps .git, .env, .kamal and node_modules out of the
+  # build context.
+  #
+  # Tradeoff: the image reflects the working tree rather than a commit. Once this
+  # is committed, dropping this line restores reproducible clone-based builds.
+  context: .

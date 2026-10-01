@@ -12,6 +12,32 @@ import { uploadCsvAction, type UploadState } from "./actions";
 /** How often to ask the API about an import that is still running. */
 const POLL_INTERVAL_MS = 2000;
 
+/**
+ * The per-file ceiling, in bytes. Kept in step with `SalaryImport::MAX_FILE_SIZE`
+ * on the Rails side, which is the authority: this check exists so a rejected file
+ * is refused before it is uploaded rather than after, not so the rule lives here.
+ */
+const MAX_FILE_SIZE_BYTES = 2 * 1024 * 1024;
+
+/**
+ * The reasons a file is refused without being sent anywhere.
+ *
+ * The wording is the same as the model's, so a file caught here and the same file
+ * caught by Rails read identically to the user — which is the point of stating
+ * them once per layer rather than inventing a second voice.
+ *
+ * Both checks are redundant with the server by design. Without them a 5 MB file
+ * would reach Next, be refused against its Server Action body limit, and surface
+ * as a minified React error instead of a sentence anyone can act on.
+ */
+function rejectionFor(file: File): string | null {
+  if (!file.name.toLowerCase().endsWith(".csv")) return "Only CSV files are allowed.";
+
+  if (file.size > MAX_FILE_SIZE_BYTES) return "File size must be 2 MB or smaller.";
+
+  return null;
+}
+
 export function ImportsView({ initial }: { initial: SalaryImport[] }) {
   // `key` on the child resets this subtree when the server sends a different
   // list, so a newly queued import appears without syncing props into state in
@@ -267,6 +293,12 @@ function UploadForm({
   onUploaded: () => void;
 }) {
   const [file, setFile] = useState<File | null>(null);
+  // A refusal the browser made itself, held here because the server action was
+  // never dispatched and so has no state to put it in. `clientError ?? state.error`
+  // reads it first: it is the more recent of the two.
+  const [clientError, setClientError] = useState<string | null>(null);
+
+  const rejection = clientError ?? state.error;
 
   // `router.refresh()` is a call out to Next rather than a state update, so the
   // effect is its right home. It does not set the picked file — the `key` on
@@ -298,6 +330,12 @@ function UploadForm({
         onSubmit={(event) => {
           event.preventDefault();
           if (!file) return;
+          const refused = rejectionFor(file);
+          if (refused) {
+            setClientError(refused);
+            return;
+          }
+          setClientError(null);
           const form = new FormData();
           form.append("file", file);
           startTransition(() => {
@@ -305,7 +343,7 @@ function UploadForm({
           });
         }}
       >
-        {state.error ? <ErrorNote message={state.error} /> : null}
+        {rejection ? <ErrorNote message={rejection} /> : null}
         {state.success ? (
           <p className="rounded-lg border border-positive/20 bg-positive-soft px-3.5 py-2.5 text-sm text-positive">
             {state.success}
@@ -321,13 +359,17 @@ function UploadForm({
             name="file"
             type="file"
             accept=".csv,text/csv"
-            onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+            onChange={(event) => {
+              setFile(event.target.files?.[0] ?? null);
+              setClientError(null);
+            }}
             className="field file:mr-3 file:rounded-md file:border-0 file:bg-surface-sunken file:px-2.5 file:py-1 file:text-xs file:font-medium file:text-ink-soft"
           />
         </div>
 
         <p className="text-xs text-muted">
-          Up to 2 MB, with a <code className="font-mono">.csv</code> extension.
+          Up to 2 MB per file, with a <code className="font-mono">.csv</code> extension. 60 MB per
+          day.
         </p>
 
         <UploadButton disabled={!file} pending={pending} />

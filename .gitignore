@@ -30,8 +30,17 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
+# env files. `.env*` also matches `.env.example`, so the template is re-included
+# explicitly below -- without this line it could never be committed, and a repo
+# that reads deploy-time values out of .env needs a documented list of them.
 .env*
+!.env.example
+
+# Kamal secrets. `secrets.*` deliberately does NOT match `secrets-common`, which
+# holds only `$(...)` command references and is meant to be committed. Anything
+# per-environment -- secrets.production, secrets.local -- is ignored.
+.kamal/secrets.*
+.kamal/secrets.local
 
 # vercel
 .vercel
