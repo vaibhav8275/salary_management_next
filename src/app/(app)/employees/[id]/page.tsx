@@ -4,9 +4,9 @@ import {
   getEmployee,
   getSalaryAudit,
   getSalaryHistory,
-  getToken,
 } from "@/lib/api";
 import { isApiRequestError } from "@/lib/errors";
+import { requireAuth } from "@/lib/session";
 import type { EmployeeDetail, SalaryRecordAudit, SalaryRecord } from "@/lib/types";
 import { EmployeeDetailView } from "./employee-detail-view";
 
@@ -18,8 +18,7 @@ import { EmployeeDetailView } from "./employee-detail-view";
 export default async function EmployeePage(props: PageProps<"/employees/[id]">) {
   const { id } = await props.params;
 
-  const token = await getToken();
-  if (!token) redirect("/login");
+  const token = await requireAuth();
 
   // The data is fetched outside the JSX: React renders the returned element
   // after this function has already returned, so a try/catch wrapped around the

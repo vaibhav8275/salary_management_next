@@ -1,5 +1,22 @@
 import { cookies } from "next/headers";
-import { SESSION_COOKIE, USER_COOKIE } from "./api";
+import { redirect } from "next/navigation";
+import { getToken, SESSION_COOKIE, USER_COOKIE } from "./api";
+
+/**
+ * The authenticated pages' one-line guard: the token is required for any
+ * server-rendered shell, page or action, so this reads it and redirects when it
+ * is missing. Centralizing the check — instead of every page repeating
+ * `if (!token) redirect("/login")` — keeps the failure mode identical in one
+ * place. The return value is the caller's token to pass to the API.
+ *
+ * This is still a *presence* check: the token's signature is verified by Rails
+ * on the data call it gets attached to, never here.
+ */
+export async function requireAuth(): Promise<string> {
+  const token = await getToken();
+  if (!token) redirect("/login");
+  return token;
+}
 
 /**
  * Whether to mark the cookies `Secure`.

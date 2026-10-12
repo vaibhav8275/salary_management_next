@@ -6,9 +6,9 @@ import {
   createSalaryRecord,
   editSalaryRecord,
   getSalaryHistory,
-  getToken,
 } from "@/lib/api";
 import { isApiRequestError } from "@/lib/errors";
+import { requireAuth } from "@/lib/session";
 
 export interface SalaryActionState {
   error?: string;
@@ -29,8 +29,7 @@ async function run(
   success: string,
   paths: string[],
 ): Promise<SalaryActionState> {
-  const token = await getToken();
-  if (!token) redirect("/login");
+  const token = await requireAuth();
 
   try {
     await action(token);
@@ -79,8 +78,7 @@ export async function createSalaryAction(
   // model's own validation message dropped. The date is the only field here with
   // a rule the server enforces but does not report, and it is the one people hit
   // most — re-entering a date already in the history.
-  const token = await getToken();
-  if (!token) redirect("/login");
+  const token = await requireAuth();
 
   try {
     const taken = (await getSalaryHistory(token, employeeId)).some(

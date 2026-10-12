@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
-import { getImport, getToken, listImportErrors } from "@/lib/api";
+import { getImport, listImportErrors } from "@/lib/api";
 import { isApiRequestError } from "@/lib/errors";
+import { requireAuth } from "@/lib/session";
 import type { SalaryImport, SalaryImportErrorPage } from "@/lib/types";
 import { ImportDetailView } from "./import-detail-view";
 
@@ -18,8 +19,7 @@ export default async function ImportDetailPage(props: PageProps<"/imports/[id]">
   const parsed = Number.parseInt(rawPage ?? "1", 10);
   const page = Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
 
-  const token = await getToken();
-  if (!token) redirect("/login");
+  const token = await requireAuth();
 
   let salaryImport: SalaryImport;
   let failures: SalaryImportErrorPage;

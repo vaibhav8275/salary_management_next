@@ -1,21 +1,19 @@
-import { redirect } from "next/navigation";
-import { getToken } from "@/lib/api";
-import { getSessionUser } from "@/lib/session";
+import { getSessionUser, requireAuth } from "@/lib/session";
 import { signOutAction } from "@/app/login/actions";
 import { AppNav } from "./app-nav";
 
 /**
  * The signed-in shell: a fixed sidebar and a header carrying the account.
  *
- * `getToken()` is called only as a guard. A missing token means the cookie was
- * dropped (it expired, or was cleared) and there is nothing to render, so this
- * redirects rather than showing an empty shell that would fail on every child
- * fetch. `proxy.ts` normally catches this first; the check here is what makes the
- * shell correct on its own, since a page is not required to go through proxy.
+ * `requireAuth()` is called only as a guard. A missing token means the cookie
+ * was dropped (it expired, or was cleared) and there is nothing to render, so
+ * this redirects rather than showing an empty shell that would fail on every
+ * child fetch. `proxy.ts` normally catches this first; the check here is what
+ * makes the shell correct on its own, since a page is not required to go
+ * through proxy.
  */
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
-  const token = await getToken();
-  if (!token) redirect("/login");
+  await requireAuth();
 
   const user = await getSessionUser();
 

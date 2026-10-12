@@ -2,8 +2,9 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { getToken, uploadImport } from "@/lib/api";
+import { uploadImport } from "@/lib/api";
 import { isApiRequestError } from "@/lib/errors";
+import { requireAuth } from "@/lib/session";
 
 export interface UploadState {
   error?: string;
@@ -29,8 +30,7 @@ export async function uploadCsvAction(
   _prev: UploadState,
   formData: FormData,
 ): Promise<UploadState> {
-  const token = await getToken();
-  if (!token) redirect("/login");
+  const token = await requireAuth();
 
   const file = formData.get("file");
 

@@ -1,13 +1,13 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import {
-  getToken,
   listEmployees,
   employeeCountByDepartment,
   employeeCountByCountry,
   employeeCountByJobTitle,
 } from "@/lib/api";
 import { isApiRequestError } from "@/lib/errors";
+import { requireAuth } from "@/lib/session";
 import type { EmployeeCountRow } from "@/lib/types";
 import { EmployeeTable } from "./employee-table";
 
@@ -22,8 +22,7 @@ export default async function EmployeesPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const token = await getToken();
-  if (!token) redirect("/login");
+  const token = await requireAuth();
 
   const params = await searchParams;
   const filters = normalizeFilters(params);

@@ -637,8 +637,14 @@ function arcPath(
 
 function polar(cx: number, cy: number, radius: number, angle: number) {
   const radians = (angle * Math.PI) / 180;
+  // Round to 4 decimals so the `d` string is identical in the server render and
+  // the hydration render. The two runs execute Math.cos/sin in different JS
+  // engines (Node vs the browser), which agree to ~14 significant digits and
+  // disagree after that — an attribute mismatch React refuses to patch. 0.0001px
+  // is far below the SVG device resolution, so the visual is unchanged.
+  const round = (v: number) => Math.round(v * 10000) / 10000;
   return {
-    x: cx + radius * Math.cos(radians),
-    y: cy + radius * Math.sin(radians),
+    x: round(cx + radius * Math.cos(radians)),
+    y: round(cy + radius * Math.sin(radians)),
   };
 }
